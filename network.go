@@ -100,7 +100,7 @@ func networkPing(peer *Node) (time.Duration, bool) {
 }
 
 func networkPut(peer *Node, key []byte, value []byte) bool {
-	url := fmt.Sprintf("http://%s/put/%s", peer.Address, string(key))
+	url := fmt.Sprintf("http://%s/store/%s", peer.Address, string(key))
 	resp, err := http.Post(url, "application/octet-stream", bytes.NewBuffer(value))
 	if err != nil {
 		return false
@@ -110,7 +110,7 @@ func networkPut(peer *Node, key []byte, value []byte) bool {
 }
 
 func networkGet(peer *Node, key []byte) ([]byte, bool) {
-	url := fmt.Sprintf("http://%s/get/%s", peer.Address, string(key))
+	url := fmt.Sprintf("http://%s/store/%s", peer.Address, string(key))
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, false
@@ -208,18 +208,17 @@ func (_dht *DHT) Listen(address string) {
 		json.NewEncoder(w).Encode(&res)
 	})
 
-	r.HandleFunc("/put/{key}", func(w http.ResponseWriter, req *http.Request) {
-		fmt.Println("server: received PUT")
-
+	r.HandleFunc("/store/{key}", func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
 		key := vars["key"]
 
-		_dht.Self().Put([]byte(key), []byte(key))
+		b, _ := io.ReadAll(req.Body)
+		_dht.Self().Put([]byte(key), b)
 
 		w.Header().Add("Public-Key", base64.RawURLEncoding.EncodeToString(_dht.Self().PublicKey))
-	})
+	}).Methods("POST")
 
-	r.HandleFunc("/get/{key}", func(w http.ResponseWriter, req *http.Request) {
+	r.HandleFunc("/store/{key}", func(w http.ResponseWriter, req *http.Request) {
 		fmt.Println("server: received GET")
 
 		vars := mux.Vars(req)
@@ -233,7 +232,7 @@ func (_dht *DHT) Listen(address string) {
 		w.Write(data)
 
 		w.Header().Add("Public-Key", base64.RawURLEncoding.EncodeToString(_dht.Self().PublicKey))
-	})
+	}).Methods("GET")
 
 	http.ListenAndServe(address, r)
 }
