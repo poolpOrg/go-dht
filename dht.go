@@ -38,6 +38,9 @@ type DHT struct {
 
 	muNodes sync.Mutex
 	nodes   map[[k]byte]*Node
+
+	muData sync.Mutex
+	data   map[[k]byte][]byte
 }
 
 type Node struct {
@@ -57,6 +60,7 @@ func NewDHT(publicKey []byte, nodeAddress string) (*DHT, error) {
 		dht.finger[i] = make([][32]byte, 0)
 	}
 	dht.nodes = make(map[[k]byte]*Node)
+	dht.data = make(map[[k]byte][]byte)
 	dht.AddNode(NewNode(dht, publicKey, nodeAddress))
 	return dht, nil
 }
@@ -113,6 +117,19 @@ func (_dht *DHT) updateFingerTable() {
 		finger[vnodeID[0]] = append(finger[vnodeID[0]], vnodeID)
 	}
 	_dht.finger = finger
+}
+
+func (_dht *DHT) Put(key [32]byte, value []byte) {
+	_dht.muData.Lock()
+	defer _dht.muData.Unlock()
+	_dht.data[key] = value
+}
+
+func (_dht *DHT) Get(key [32]byte) ([]byte, bool) {
+	_dht.muData.Lock()
+	defer _dht.muData.Unlock()
+	value, exists := _dht.data[key]
+	return value, exists
 }
 
 func NewNode(dht *DHT, publicKey []byte, address string) *Node {
@@ -183,6 +200,28 @@ func (node *Node) Lookup(key [32]byte) [32]byte {
 			}
 		}
 		i = (i + 1) % len(node.dht.finger)
+	}
+}
+
+func (node *Node) Put(key []byte, value []byte) {
+	keysum := sha256.Sum256(key)
+	vnodeID := node.Lookup(keysum)
+	dest := node.dht.VNodeLookup(vnodeID)
+	if dest == node {
+		node.dht.Put(keysum, value)
+	} else {
+		networkPut(dest, key, value)
+	}
+}
+
+func (node *Node) Get(key []byte) ([]byte, bool) {
+	keysum := sha256.Sum256(key)
+	vnodeID := node.Lookup(keysum)
+	dest := node.dht.VNodeLookup(vnodeID)
+	if dest == node {
+		return node.dht.Get(keysum)
+	} else {
+		return networkGet(dest, key)
 	}
 }
 

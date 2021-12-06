@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -98,6 +99,28 @@ func networkPing(peer *Node) (time.Duration, bool) {
 	return time.Since(t0), true
 }
 
+func networkPut(peer *Node, key []byte, value []byte) bool {
+	url := fmt.Sprintf("http://%s/put/%s", peer.Address, string(key))
+	resp, err := http.Post(url, "application/octet-stream", bytes.NewBuffer(value))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return true
+}
+
+func networkGet(peer *Node, key []byte) ([]byte, bool) {
+	url := fmt.Sprintf("http://%s/get/%s", peer.Address, string(key))
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	return b, true
+}
+
 func (_dht *DHT) Listen(address string) {
 	r := mux.NewRouter()
 	r.HandleFunc("/debug", func(w http.ResponseWriter, req *http.Request) {
@@ -114,6 +137,12 @@ func (_dht *DHT) Listen(address string) {
 			//	fmt.Fprintf(w, "\t\t%02x\n", vnode)
 			//}
 		}
+
+		fmt.Fprintf(w, "\nkeys on node:\n")
+		for k, _ := range _dht.data {
+			fmt.Fprintf(w, "\t%02x\n", k)
+		}
+
 		fmt.Fprintf(w, "\nrouting table:\n")
 		for i, v := range _dht.finger {
 			if len(v) != 0 {
@@ -177,6 +206,33 @@ func (_dht *DHT) Listen(address string) {
 		w.Header().Add("Public-Key", base64.RawURLEncoding.EncodeToString(_dht.Self().PublicKey))
 
 		json.NewEncoder(w).Encode(&res)
+	})
+
+	r.HandleFunc("/put/{key}", func(w http.ResponseWriter, req *http.Request) {
+		fmt.Println("server: received PUT")
+
+		vars := mux.Vars(req)
+		key := vars["key"]
+
+		_dht.Self().Put([]byte(key), []byte(key))
+
+		w.Header().Add("Public-Key", base64.RawURLEncoding.EncodeToString(_dht.Self().PublicKey))
+	})
+
+	r.HandleFunc("/get/{key}", func(w http.ResponseWriter, req *http.Request) {
+		fmt.Println("server: received GET")
+
+		vars := mux.Vars(req)
+		key := vars["key"]
+
+		data, exists := _dht.Self().Get([]byte(key))
+		if !exists {
+			w.WriteHeader(404)
+			return
+		}
+		w.Write(data)
+
+		w.Header().Add("Public-Key", base64.RawURLEncoding.EncodeToString(_dht.Self().PublicKey))
 	})
 
 	http.ListenAndServe(address, r)
