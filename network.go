@@ -144,10 +144,7 @@ func (_dht *DHT) Listen(address string) {
 		}
 
 		fmt.Fprintf(w, "\nrouting table:\n")
-		for i, v := range _dht.finger {
-			if len(v) != 0 {
-				fmt.Fprintf(w, "%02x:\n", i)
-			}
+		for _, v := range _dht.finger {
 			for _, vnodeID := range v {
 				fmt.Fprintf(w, "\t%02x\n", vnodeID)
 			}

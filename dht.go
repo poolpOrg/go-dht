@@ -28,6 +28,7 @@ import (
 const (
 	k = sha256.Size
 	m = k << 3
+	r = 3 // replicas, bump
 )
 
 type DHT struct {
@@ -97,6 +98,24 @@ func (_dht *DHT) VNodeLookup(id [32]byte) *Node {
 	return nil
 }
 
+func (_dht *DHT) VNodeNext(id [32]byte) [32]byte {
+	_dht.muNodes.Lock()
+	defer _dht.muNodes.Unlock()
+	i := int(id[0])
+	isNext := false
+	for {
+		for _, vnodeID := range _dht.finger[i] {
+			if isNext {
+				return vnodeID
+			}
+			if bytes.Equal(id[:], vnodeID[:]) {
+				isNext = true
+			}
+		}
+		i = (i + 1) % len(_dht.finger)
+	}
+}
+
 func (_dht *DHT) updateFingerTable() {
 	var finger [m][][32]byte
 	for i := 0; i < m; i++ {
@@ -147,7 +166,7 @@ func NewNode(dht *DHT, publicKey []byte, address string) *Node {
 }
 
 func (node *Node) run() {
-	if bytes.Compare(node.PublicKey[:], node.dht.PublicKey[:]) == 0 {
+	if bytes.Equal(node.PublicKey[:], node.dht.PublicKey[:]) {
 		go node.dht.Listen(node.Address)
 	} else {
 		go func() {
@@ -207,10 +226,34 @@ func (node *Node) Put(key []byte, value []byte) {
 	keysum := sha256.Sum256(key)
 	vnodeID := node.Lookup(keysum)
 	dest := node.dht.VNodeLookup(vnodeID)
+
 	if dest == node {
+		// on responsible node, forward to replicas and store
+		replicaID := vnodeID
+		for i := 0; i < r-1; i++ {
+			replicaID = node.dht.VNodeNext(replicaID)
+			replica := node.dht.VNodeLookup(replicaID)
+			networkPut(replica, key, value)
+		}
 		node.dht.Put(keysum, value)
+
 	} else {
-		networkPut(dest, key, value)
+		// on non-responsible node, store if replica or forward to responsible
+		isReplica := false
+		replicaID := vnodeID
+		for i := 0; i < r-1; i++ {
+			replicaID = node.dht.VNodeNext(replicaID)
+			replica := node.dht.VNodeLookup(replicaID)
+			if replica == node {
+				isReplica = true
+				break
+			}
+		}
+		if isReplica {
+			node.dht.Put(keysum, value)
+		} else {
+			networkPut(dest, key, value)
+		}
 	}
 }
 
