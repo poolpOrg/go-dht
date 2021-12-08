@@ -35,22 +35,21 @@ type reqJoin struct {
 	Address   string
 }
 
-type reqFindSuccessor struct {
-	Id string
-}
-
-type reqFindPredecessor struct {
-	Id string
-}
-
-type reqUpdateFingerTable struct {
-	StartKey string
-	Index    int64
-}
-
 type nodeInfo struct {
 	PublicKey string
 	Address   string
+}
+
+func networkLookup(peer *Node, key [32]byte) (time.Duration, bool) {
+	url := fmt.Sprintf("http://%s/lookup/"+fmt.Sprintf("%02x", key), peer.Address)
+
+	t0 := time.Now()
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	return time.Since(t0), true
 }
 
 func networkJoin(node *Node, peer_addr string) *Node {
@@ -133,22 +132,13 @@ func (_dht *DHT) Listen(address string) {
 		fmt.Fprintf(w, "\nknown nodes on the ring:\n")
 		for _, v := range _dht.nodes {
 			fmt.Fprintf(w, "\t%02x %s %s\n", v.Id, v.Address, v.latency)
-			//for _, vnode := range v.VNodes {
-			//	fmt.Fprintf(w, "\t\t%02x\n", vnode)
-			//}
 		}
 
-		fmt.Fprintf(w, "\nkeys on node:\n")
+		fmt.Fprintf(w, "\nkeys on node (%d):\n", len(_dht.data))
 		for k, _ := range _dht.data {
 			fmt.Fprintf(w, "\t%02x\n", k)
 		}
 
-		fmt.Fprintf(w, "\nrouting table:\n")
-		for _, v := range _dht.finger {
-			for _, vnodeID := range v {
-				fmt.Fprintf(w, "\t%02x\n", vnodeID)
-			}
-		}
 		fmt.Fprintf(w, "<pre>\n")
 	})
 
@@ -187,13 +177,13 @@ func (_dht *DHT) Listen(address string) {
 	})
 
 	r.HandleFunc("/lookup/{key}", func(w http.ResponseWriter, req *http.Request) {
-		fmt.Println("server: received LOOKUP")
 
 		vars := mux.Vars(req)
 		key := vars["key"]
+		fmt.Println("server: received LOOKUP", key)
 
 		keysum := sha256.Sum256([]byte(key))
-		vnodeID := _dht.Self().Lookup(keysum)
+		vnodeID := _dht.Lookup(keysum)
 		node := _dht.VNodeLookup(vnodeID)
 
 		var res nodeInfo
